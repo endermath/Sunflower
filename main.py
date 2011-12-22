@@ -40,6 +40,7 @@ soundGrowth = pygame.mixer.Sound('Growth.wav')
 soundMove = pygame.mixer.Sound('Move.wav')
 soundRefillWater = pygame.mixer.Sound('RefillWater.wav')
 soundPickup = pygame.mixer.Sound('Pickup.wav')
+soundSkullPickup = pygame.mixer.Sound('SkullPickup.wav')
 
 def drawIcon(surf,x,y):
     windowSurfaceObj.blit(surf,(x*iconSize,y*iconSize))
@@ -49,6 +50,10 @@ class Player:
     ypos = screenSize-2  #y position within 32x32 grid
     dir = 1  #1=facing right, -1=facing left
     water = 2000
+    pellets = 0
+    watering = False  #true when watering flowers
+    refilling = False #true when refilling water
+    maxWater = 8000
 
 class Flower:
     height = 1
@@ -59,6 +64,44 @@ class Flower:
         self.height = random.randint(1,4)
         self.water = random.randint(2000,4000)
 
+class FallingItem:
+    xpos = 4
+    ypos = 0
+    surf = None
+    fallTime = 15
+    fallCounter = 15
+    onFloorTime = 100
+    onFloorCounter = 100
+    def __init__(self,xpos):
+        self.xpos=xpos
+        self.fallCounter = self.fallTime
+        self.onFloorCounter = self.onFloorTime
+    def fallAndDecideIfTimeToRemove(self):
+        self.fallCounter-=1
+        if self.fallCounter<0:
+            self.fallCounter=self.fallTime
+            self.ypos=min(self.ypos+1,screenSize-2)
+        if self.ypos == screenSize-2:
+            self.onFloorCounter -=1
+            if self.onFloorCounter<0:
+                return False
+        return True
+    def draw(self):
+        if self.ypos<screenSize-2 or self.onFloorCounter>30 or self.onFloorCounter%2>0:
+            drawIcon(self.surf,self.xpos,self.ypos)
+
+class Skull(FallingItem):
+    surf = skullSurfaceObj
+    def giveBonus(self,p):
+        p.water = p.water/2
+        soundSkullPickup.play()
+
+class Pellet(FallingItem):
+    surf = pelletSurfaceObj
+    def giveBonus(self,p):
+        p.pellets += 1
+        soundPickup.play()
+
 outside = False  # True if outside
 
 player = Player()
@@ -67,9 +110,14 @@ flowers.append(Flower(random.randint(1,screenSize-2)))
 flowers.append(Flower(random.randint(1,screenSize-2)))
 flowers.append(Flower(random.randint(1,screenSize-2)))
 
-watering = False
-wateringTime = 30
+fallingItems = []
+
+wateringTime = 15
 wateringCounter = wateringTime
+refillingTime = 30
+
+fallSpawnTime = 60
+fallSpawnCounter = fallSpawnTime
 
 while True:
     
@@ -86,8 +134,26 @@ while True:
         windowSurfaceObj.blit(dirtSurfaceObj, (x*iconSize, (screenSize-1)*iconSize))
     
 
+    #if outside, draw tap and uptade falling items
     if outside:
         drawIcon(tapSurfaceObj, screenSize-2,screenSize-3)
+        for f in fallingItems:
+            if not f.fallAndDecideIfTimeToRemove():
+                fallingItems.remove(f)
+            else:
+                f.draw()
+                if (f.xpos,f.ypos) == (player.xpos,player.ypos):
+                    f.giveBonus(player)
+                    fallingItems.remove(f)
+
+        
+        fallSpawnCounter -=1
+        if fallSpawnCounter<0:
+            fallSpawnCounter = fallSpawnTime+random.randint(10,50)
+            pos=random.randint(1,screenSize-3)
+            fallingItems.append(random.choice([Skull(pos),Pellet(pos)]))
+        
+    #if inside, draw flowers
     else:
         for f in flowers:
             for s in range(1,f.height+1):
@@ -117,22 +183,28 @@ while True:
 
     
     #if watering
-    if watering:
+    if player.watering:
         wateringCounter -= 1
-        if (wateringCounter>0):            
-            player.water-=5
-            if (outside and player.xpos==screenSize-3):
-                if wateringCounter%10>5:
-                    drawIcon(tapSplashSurfaceObj, screenSize-2,screenSize-2)
-                    player.water+=50
-            else:    
+        if (wateringCounter>0 and player.water>0):            
+            player.water = max(player.water-15,0)
+            for f in flowers:
+                if f.xpos == 2*player.dir+player.xpos:
+                    f.water+=15
+            if wateringCounter%2>0:    
                 windowSurfaceObj.blit(pygame.transform.flip(waterSplashSurfaceObj,(player.dir==-1),False),((2*player.dir+player.xpos)*iconSize,player.ypos*iconSize))
-                for f in flowers:
-                    if f.xpos == 2*player.dir+player.xpos:
-                        f.water+=5
         else:
-            watering=False
-        
+            player.watering=False
+
+    #if refilling water at the tap
+    if player.refilling:
+        wateringCounter -= 1
+        if (wateringCounter>0 and player.water<=player.maxWater):
+            player.water+=50
+            #flash water splash below the tap
+            if wateringCounter%2>0:
+                drawIcon(tapSplashSurfaceObj, screenSize-2,screenSize-2)
+        else:
+            player.refilling = False
     
     # show some text
     msgSurfaceObj = pygame.transform.scale2x(fontObj.render("Sandy's Sunflowers",False,pygame.Color(0,0,0)))
@@ -145,6 +217,12 @@ while True:
     msgRectObj = msgSurfaceObj.get_rect()
     msgRectObj.centerx = windowSurfaceObj.get_rect().centerx
     msgRectObj.centery = 50
+    windowSurfaceObj.blit(msgSurfaceObj, msgRectObj)
+
+    msgSurfaceObj = pygame.transform.scale2x(fontObj.render("Pellets: "+str(player.pellets),False,pygame.Color(0,0,0)))
+    msgRectObj = msgSurfaceObj.get_rect()
+    msgRectObj.centerx = windowSurfaceObj.get_rect().centerx
+    msgRectObj.centery = 80
     windowSurfaceObj.blit(msgSurfaceObj, msgRectObj)
 
     # take care of events
@@ -176,9 +254,16 @@ while True:
             
 
             if event.key==K_SPACE:
-                soundRefillWater.play()
-                wateringCounter=wateringTime
-                watering=True
+                if (not player.watering) and (not player.refilling):
+                    if (outside and player.xpos==screenSize-3):
+                        player.refilling=True
+                        wateringCounter=refillingTime
+                        soundRefillWater.play()
+                    else:
+                        if player.water>0:
+                            wateringCounter=wateringTime
+                            soundRefillWater.play()
+                            player.watering=True
         
     pygame.display.update()
     fpsClock.tick(30)
