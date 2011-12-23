@@ -4,10 +4,18 @@ from pygame.locals import *
 pygame.init()
 fpsClock = pygame.time.Clock()
 
-pygame.display.set_caption("Sandy's Sunflowers")
-
+# Constants of the game
+FPS=60           #frames per second
+START_TIME=60    #number of seconds you start with
+SPAWN_TIME=FPS*2 #minimum time until next item spawns outside
 scaleFactor=2
 
+# Global variables common to both title screen and game loop
+hiscore = 0
+isGameOver = False
+
+
+pygame.display.set_caption("Sandy's Sunflowers")
 
 iconSize=16*scaleFactor
 
@@ -21,7 +29,7 @@ fontSurfaceObj = pygame.image.load('font.png')
 fontSurfaceObj = pygame.transform.scale(fontSurfaceObj,(scaleFactor*fontSizex,scaleFactor*fontSizey))
 charSize = 8*scaleFactor
 
-fontmap = "ABCDEFGHIJKLMNOPQRSTUVWXYZ:1234567890' ="
+fontmap = "ABCDEFGHIJKLMNOPQRSTUVWXYZ:1234567890' =!"
 
 
 def myRender(surf,pos,text):
@@ -43,6 +51,7 @@ flowerSurfaceObj = getSurfaceFromIcons(2,0)
 flowerstalkSurfaceObj = getSurfaceFromIcons(2,1)
 pelletSurfaceObj = getSurfaceFromIcons(3,0)
 skullSurfaceObj = getSurfaceFromIcons(4,0)
+clockSurfaceObj = getSurfaceFromIcons(4,1)
 tapSurfaceObj = getSurfaceFromIcons(5,0)
 tapSplashSurfaceObj = getSurfaceFromIcons(5,1)
 
@@ -68,15 +77,22 @@ class Player:
     xpos = 5  #x position within 32x32 grid
     ypos = screenSize-2  #y position within 32x32 grid
     dir = 1  #1=facing right, -1=facing left
-    water = 2000
+    water = 12000
     pellets = 0
     watering = False  #true when watering flowers
     refilling = False #true when refilling water
-    maxWater = 8000
+    maxWater = 12000
     score = 0
     isOutside = False  # True if outside
+    def __init__(self):
+        self.timeLeft = START_TIME
     
-    def draw(self):
+    def tick(self):
+        global isGameOver
+        self.timeLeft -= 1.0/FPS
+        if self.timeLeft < 0:
+            self.timeLeft=0
+            isGameOver = True
         # draw Sandy and her watering can
         if (self.dir==1):
             windowSurfaceObj.blit(sandySurfaceObj, (self.xpos*iconSize,self.ypos*iconSize))
@@ -107,7 +123,7 @@ class Player:
 
 class Flower:
     height = 1
-    waterMax = 10000.0
+    waterMax = 3000.0
     xpos = 1
     def __init__(self,xpos):
         self.xpos = xpos
@@ -129,7 +145,9 @@ class Flower:
                     if self.height > screenSize-5:
                         self.isFinished = True
             
-
+    def addWater(self,water):
+        self.water = min(self.water+water, self.waterMax)
+        
     def draw(self):
         for s in range(1,self.height+1):
             drawIcon(flowerstalkSurfaceObj,self.xpos,screenSize-1-s)    #draw the stalk
@@ -144,9 +162,9 @@ class FallingItem:
     def __init__(self,xpos,ypos):
         self.xpos=xpos*iconSize
         self.ypos=ypos*iconSize
-        self.xspeed = random.gauss(0,10)
+        self.xspeed = random.gauss(0,3)
         self.yspeed = random.gauss(0,3)
-        self.onFloorCounter = 70
+        self.onFloorCounter = 4*FPS
         self.isFalling = True
         
     def fallAndDecideIfTimeToRemove(self):
@@ -171,7 +189,7 @@ class FallingItem:
         return True
 
     def draw(self):
-        if self.ypos<(screenSize-2)*iconSize or self.onFloorCounter>30 or self.onFloorCounter%2>0:
+        if self.ypos<(screenSize-2)*iconSize or self.onFloorCounter>1*FPS or self.onFloorCounter%4>1:
             windowSurfaceObj.blit(self.surf,(int(round(self.xpos)),int(round(self.ypos))))
 
 class Skull(FallingItem):
@@ -180,35 +198,37 @@ class Skull(FallingItem):
         p.water = p.water/2
         soundSkullPickup.play()
 
+class ClockItem(FallingItem):
+    surf = clockSurfaceObj
+    def giveBonus(self,p):
+        p.score += 7
+        p.timeLeft += 8
+        soundPickup.play()
+
 class Pellet(FallingItem):
     surf = pelletSurfaceObj
     def giveBonus(self,p):
-        p.score += 5
+        p.score += 7
         p.pellets += 1
         soundPickup.play()
 
 class FlowerItem(FallingItem):
     surf = flowerSurfaceObj
     def giveBonus(self,p):
-        p.score+= 100
+        p.score+= 50
         soundPickup.play()
 
 class FlowerStalkItem(FallingItem):
     surf = flowerstalkSurfaceObj
     def giveBonus(self,p):
-        p.score+= 50
+        p.score+= 25
         soundPickup.play()
 
-# Global variables common to both title screen and game loop
-hiscore = 0
-isPlayingTheGame = True
-# Constants
-fallSpawnTime = 40
 
 
 # Show title screen and wait for player to press space.
 def showTitleScreen():
-    global isPlayingTheGame,hiscore
+    global isGameOver,hiscore
 
     # fill background black
     windowSurfaceObj.fill(pygame.Color(0,0,0))
@@ -246,19 +266,16 @@ def showTitleScreen():
 
 
 class Game():
-    def __init__(self):        
+    def __init__(self):                
         self.player = Player()
         self.flowers = []
-        self.flowers.append(Flower(random.randint(1,screenSize-2)))
-        self.flowers.append(Flower(random.randint(1,screenSize-2)))
         self.flowers.append(Flower(random.randint(1,screenSize-2)))
 
         self.fallingItems = []
         self.fallingFlowers = []
 
-        self.fallSpawnCounter = fallSpawnTime   #delay until next falling item is created
+        self.fallSpawnCounter = SPAWN_TIME   #delay until next falling item is created
         self.wateringCounter = 0            #for animating the splashing of water when watering or refilling
-
 
 
     def updateObjects(self):
@@ -272,9 +289,9 @@ class Game():
                 
         self.fallSpawnCounter -=1
         if self.fallSpawnCounter<0:
-            self.fallSpawnCounter = fallSpawnTime+random.randint(10,50)
+            self.fallSpawnCounter = SPAWN_TIME+random.randint(0,FPS*3)
             pos=random.randint(1,screenSize-3)
-            self.fallingItems.append(random.choice([Skull(pos,0),Pellet(pos,0)]))
+            self.fallingItems.append(random.choice([ClockItem(pos,0),Pellet(pos,0)]))
 
         # flowers
         for f in self.flowers:
@@ -291,18 +308,18 @@ class Game():
         # fill background
         windowSurfaceObj.fill(pygame.Color(38,94,179))
         
-        # draw bricks and dirt
-        for y in range(0,screenSize-1):
-            if (y<screenSize-3 or not isOutside):
-                windowSurfaceObj.blit(brickSurfaceObj, (0,y*iconSize))
-            if (y<screenSize-3 or isOutside):
-                windowSurfaceObj.blit(brickSurfaceObj, ((screenSize-1)*iconSize,y*iconSize))
-        for x in range(0,screenSize):
-            windowSurfaceObj.blit(dirtSurfaceObj, (x*iconSize, (screenSize-1)*iconSize))
         
 
         #if outside, draw tap and update falling items
         if isOutside:
+            # draw bricks
+            for y in range(0,screenSize-1):
+                if y<screenSize-3:
+                    windowSurfaceObj.blit(brickSurfaceObj, (0,y*iconSize))
+                windowSurfaceObj.blit(brickSurfaceObj, ((screenSize-1)*iconSize,y*iconSize))
+            for x in range(0,screenSize):
+                windowSurfaceObj.blit(brickSurfaceObj, (x*iconSize, (screenSize-1)*iconSize))
+
             drawIcon(tapSurfaceObj, screenSize-2,screenSize-3)
             for f in self.fallingItems:
                 f.draw()
@@ -315,6 +332,14 @@ class Game():
                     
         #if inside, draw flowers
         else:
+            # draw bricks and dirt
+            for y in range(0,screenSize-1):
+                windowSurfaceObj.blit(brickSurfaceObj, (0,y*iconSize))
+                if y<screenSize-3:
+                    windowSurfaceObj.blit(brickSurfaceObj, ((screenSize-1)*iconSize,y*iconSize))
+            for x in range(0,screenSize):
+                windowSurfaceObj.blit(dirtSurfaceObj, (x*iconSize, (screenSize-1)*iconSize))
+
             for f in self.flowers:
                 f.draw()
             for f in self.fallingFlowers:
@@ -339,7 +364,17 @@ class Game():
         scorex = ((screenSize*iconSize/2)-scoreWidth)/2
         scorey = scoreTexty+charSize
         myRender(windowSurfaceObj,(scorex,scorey),str(self.player.score))
-
+        
+        #print time left
+        timeTextx = (screenSize*iconSize - 4*charSize)/2
+        timeTexty = 0
+        myRender(windowSurfaceObj,(timeTextx,timeTexty),"TIME")
+        
+        timeWidth = charSize * len(str(int(self.player.timeLeft)))
+        timeLeftx = (screenSize*iconSize-timeWidth)/2
+        timeLefty = charSize
+        myRender(windowSurfaceObj,(timeLeftx,timeLefty),str(int(self.player.timeLeft)))
+        
         #print hiscore
         hiscoreTextx = screenSize*iconSize/2 + ((screenSize*iconSize/2)-7*charSize)/2
         hiscoreTexty =0
@@ -351,10 +386,13 @@ class Game():
         myRender(windowSurfaceObj,(hiscorex,hiscorey),str(hiscore))
         
         #draw water bar
-        waterBarx = 0
+        waterBarx = charSize
         waterBary = charSize * 2
-        waterBarLength = int(screenSize*iconSize*self.player.water/float(self.player.maxWater))
-        windowSurfaceObj.fill(pygame.Color(20,20,240),Rect(waterBarx,waterBary, waterBarLength, charSize))
+        waterBarMaxLength = screenSize*iconSize-2*charSize
+        waterBarLength = int(round(waterBarMaxLength * self.player.water/float(self.player.maxWater)))
+        waterBarRect = Rect(waterBarx,waterBary, waterBarLength, charSize)
+        windowSurfaceObj.fill(pygame.Color(20,20,240),waterBarRect)
+        pygame.draw.rect(windowSurfaceObj,(210,210,210),Rect(waterBarx,waterBary,waterBarMaxLength,charSize),2)
         
         #draw pellets
         pelletsPosx = (screenSize*iconSize-6*charSize)/2
@@ -362,22 +400,48 @@ class Game():
         windowSurfaceObj.blit(pelletSurfaceObj,(pelletsPosx,pelletsPosy-charSize))
         myRender(windowSurfaceObj,(pelletsPosx+iconSize,pelletsPosy),"="+str(self.player.pellets))
 
-        
+    def showGameOverScreen(self):
+        global hiscore
+        delayTime = 3*FPS
+        isWaiting = True
+        while isWaiting:
+            #self.updateObjects()
+            self.drawScene(self.player.isOutside)
+            self.player.tick()
+            hiscore = max(hiscore, self.player.score)
+            self.displayScore()
+            delayTime-=1
+            if delayTime<FPS*0.25:
+                msg="GAME OVER!"
+                myRender(windowSurfaceObj,((screenSize*iconSize-len(msg)*charSize)/2, 2*charSize), msg)
+                if delayTime<0:
+                    delayTime=FPS*0.45
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type==KEYDOWN:
+                    if event.key==K_SPACE and delayTime<FPS*0.5:
+                        isWaiting=False
+            pygame.display.update()
+            fpsClock.tick(FPS)
+
+
     def gameLoop(self):    
-        global hiscore, isPlayingTheGame
+        global hiscore, isGameOver
         self.updateObjects()
         self.drawScene(self.player.isOutside)
-        self.player.draw()
+        self.player.tick()
 
         # If player is watering, animate splashing and give water to flower
         if self.player.watering:
             self.wateringCounter = self.wateringCounter-1 % 10
             if self.player.water>0:
-                self.player.water = max(self.player.water-15,0)
+                self.player.water = max(self.player.water-16,0)
                 for f in self.flowers:
                     if f.xpos == 2*self.player.dir+self.player.xpos:
-                        f.water+=15
-                if self.wateringCounter%2>0:
+                        f.addWater(16)
+                if self.wateringCounter%4>1:
                     windowSurfaceObj.blit(pygame.transform.flip(waterSplashSurfaceObj,(self.player.dir==-1),False),((2*self.player.dir+self.player.xpos)*iconSize,self.player.ypos*iconSize))
             else:
                 self.player.watering=False
@@ -438,9 +502,11 @@ class Game():
 while True:
     showTitleScreen()
     game = Game()
-    while (isPlayingTheGame):
+    isGameOver=False
+    while (not isGameOver):
         game.gameLoop()
         pygame.display.update()
-        fpsClock.tick(30)
+        fpsClock.tick(FPS)
+    game.showGameOverScreen()
     
 
