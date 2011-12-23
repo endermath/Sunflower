@@ -107,40 +107,72 @@ class Player:
 
 class Flower:
     height = 1
-    water = 3000
+    waterMax = 10000.0
     xpos = 1
     def __init__(self,xpos):
         self.xpos = xpos
         self.height = random.randint(1,4)
-        self.water = random.randint(2000,4000)
+        self.water = random.randint(1000,3000)
+        self.growCounter = 0
+        self.isFinished = False
+        
+    def grow(self):
+        if not self.isFinished:
+            self.water = self.water-self.height/3
+            if self.water<0:
+                self.isFinished = True
+            else:
+                self.growCounter += self.water/2500.0
+                if self.growCounter > 200:
+                    self.growCounter = 0
+                    self.height += 1
+                    if self.height > screenSize-5:
+                        self.isFinished = True
+            
+
+    def draw(self):
+        for s in range(1,self.height+1):
+            drawIcon(flowerstalkSurfaceObj,self.xpos,screenSize-1-s)    #draw the stalk
+        drawIcon(flowerSurfaceObj,self.xpos,screenSize-1-(self.height+1))  #draw the flower on top
+        meterRect = Rect(self.xpos*iconSize, (screenSize-1)*iconSize + iconSize/4, int(round(iconSize*self.water/self.waterMax)), iconSize/4)
+        windowSurfaceObj.fill(pygame.Color(20,20,220), meterRect)
+        
 
 class FallingItem:
-    xpos = 4
-    ypos = 0
     surf = None
-    fallTime = 15
-    fallCounter = 15
-    onFloorTime = 100
-    onFloorCounter = 100
 
-    def __init__(self,xpos):
-        self.xpos=xpos
-        self.fallCounter = self.fallTime
-        self.onFloorCounter = self.onFloorTime
-
+    def __init__(self,xpos,ypos):
+        self.xpos=xpos*iconSize
+        self.ypos=ypos*iconSize
+        self.xspeed = random.gauss(0,10)
+        self.yspeed = random.gauss(0,3)
+        self.onFloorCounter = 70
+        self.isFalling = True
+        
     def fallAndDecideIfTimeToRemove(self):
-        self.fallCounter-=1
-        if self.fallCounter<0:
-            self.fallCounter=self.fallTime
-            self.ypos=min(self.ypos+1,screenSize-2)
-        if self.ypos == screenSize-2:
-            self.onFloorCounter -=1
+        if self.isFalling:
+            self.xpos=self.xpos+self.xspeed
+            if self.xpos > (screenSize-2)*iconSize or self.xpos < iconSize :
+                self.xspeed = -self.xspeed
+            
+            self.yspeed = self.yspeed + 0.2
+            self.ypos=self.ypos+self.yspeed
+            if self.ypos > (screenSize-2)*iconSize:
+                self.ypos =(screenSize-2)*iconSize 
+                self.yspeed = -0.5*self.yspeed
+                if int(round(self.yspeed))==0:
+                    self.ypos = (screenSize-2)*iconSize
+                    self.isFalling = False
+
+        else:
+            self.onFloorCounter -=1 
             if self.onFloorCounter<0:
                 return False
         return True
+
     def draw(self):
-        if self.ypos<screenSize-2 or self.onFloorCounter>30 or self.onFloorCounter%2>0:
-            drawIcon(self.surf,self.xpos,self.ypos)
+        if self.ypos<(screenSize-2)*iconSize or self.onFloorCounter>30 or self.onFloorCounter%2>0:
+            windowSurfaceObj.blit(self.surf,(int(round(self.xpos)),int(round(self.ypos))))
 
 class Skull(FallingItem):
     surf = skullSurfaceObj
@@ -151,17 +183,27 @@ class Skull(FallingItem):
 class Pellet(FallingItem):
     surf = pelletSurfaceObj
     def giveBonus(self,p):
+        p.score += 5
         p.pellets += 1
         soundPickup.play()
 
+class FlowerItem(FallingItem):
+    surf = flowerSurfaceObj
+    def giveBonus(self,p):
+        p.score+= 100
+        soundPickup.play()
 
-
+class FlowerStalkItem(FallingItem):
+    surf = flowerstalkSurfaceObj
+    def giveBonus(self,p):
+        p.score+= 50
+        soundPickup.play()
 
 # Global variables common to both title screen and game loop
 hiscore = 0
 isPlayingTheGame = True
 # Constants
-fallSpawnTime = 60
+fallSpawnTime = 40
 
 
 # Show title screen and wait for player to press space.
@@ -173,7 +215,8 @@ def showTitleScreen():
 
     # print some text
     myRender(windowSurfaceObj,(20,20),"Sandy's Sunflowers")
-    myRender(windowSurfaceObj,(20,40),"Press space to play")
+    myRender(windowSurfaceObj,(20,40),"Keys: Left Right Space Return")
+    myRender(windowSurfaceObj,(20,60),"Press space to play")
     
 #    msgSurfaceObj = fontObj.render("Sandy's Sunflowers",False,pygame.Color(20,200,20))
 #    msgRectObj = msgSurfaceObj.get_rect()
@@ -186,16 +229,20 @@ def showTitleScreen():
 #    msgRectObj.centerx = windowSurfaceObj.get_rect().centerx
 #    msgRectObj.centery = 50
 #    windowSurfaceObj.blit(msgSurfaceObj, msgRectObj)
-    
-    
-    for event in pygame.event.get():
-        if event.type == QUIT:
-            pygame.quit()
-            sys.exit()
-        elif event.type==KEYDOWN:
-            if event.key==K_SPACE:
-                initGame()
-                titleScreen = False
+
+    isWaiting = True
+    while isWaiting:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type==KEYDOWN:
+                if event.key==K_SPACE:
+                    isWaiting = False
+        pygame.display.update()
+        fpsClock.tick(30)
+
+
 
 
 class Game():
@@ -207,6 +254,7 @@ class Game():
         self.flowers.append(Flower(random.randint(1,screenSize-2)))
 
         self.fallingItems = []
+        self.fallingFlowers = []
 
         self.fallSpawnCounter = fallSpawnTime   #delay until next falling item is created
         self.wateringCounter = 0            #for animating the splashing of water when watering or refilling
@@ -218,17 +266,25 @@ class Game():
         for f in self.fallingItems:
             if not f.fallAndDecideIfTimeToRemove():
                 self.fallingItems.remove(f)
+        for f in self.fallingFlowers:
+            if not f.fallAndDecideIfTimeToRemove():
+                self.fallingFlowers.remove(f)
+                
         self.fallSpawnCounter -=1
         if self.fallSpawnCounter<0:
             self.fallSpawnCounter = fallSpawnTime+random.randint(10,50)
             pos=random.randint(1,screenSize-3)
-            self.fallingItems.append(random.choice([Skull(pos),Pellet(pos)]))
+            self.fallingItems.append(random.choice([Skull(pos,0),Pellet(pos,0)]))
 
         # flowers
         for f in self.flowers:
-            f.water = max (f.water-1, 0)
-            if f.water<=0:
-                self.flowers.remove(f)                   #the flower died of dehydration! :(
+            f.grow()
+            if f.isFinished:
+                self.fallingFlowers.append(FlowerItem(f.xpos, screenSize-2-f.height))
+                for s in range(0,f.height):
+                    self.fallingFlowers.append(FlowerStalkItem(f.xpos, screenSize-2-s))
+                self.flowers.remove(f)                   #turn flower into falling pieces!
+                
             
 
     def drawScene(self,isOutside):
@@ -250,7 +306,9 @@ class Game():
             drawIcon(tapSurfaceObj, screenSize-2,screenSize-3)
             for f in self.fallingItems:
                 f.draw()
-                if (f.xpos,f.ypos) == (self.player.xpos,self.player.ypos):
+                itemRect = Rect(int(round(f.xpos)),int(round(f.ypos)),iconSize,iconSize)
+                playerRect = Rect(self.player.xpos*iconSize,self.player.ypos*iconSize,iconSize,iconSize)
+                if itemRect.colliderect(playerRect):
                     f.giveBonus(self.player)
                     self.fallingItems.remove(f)
 
@@ -258,14 +316,15 @@ class Game():
         #if inside, draw flowers
         else:
             for f in self.flowers:
-                for s in range(1,f.height+1):
-                    drawIcon(flowerstalkSurfaceObj,f.xpos,screenSize-1-s)    #draw the stalk
-                drawIcon(flowerSurfaceObj,f.xpos,screenSize-1-(f.height+1))  #draw the flower on top
-                #watermeter = fontObj.render(str(f.water/20),False,pygame.Color(20,20,180))
-                #waterRect=watermeter.get_rect()
-                #waterRect.centerx=f.xpos*iconSize+iconSize/2
-                #waterRect.centery=((screenSize-1)*iconSize)+iconSize/2
-                #windowSurfaceObj.blit(watermeter,waterRect)
+                f.draw()
+            for f in self.fallingFlowers:
+                f.draw()
+                flowerRect = Rect(int(round(f.xpos)),int(round(f.ypos)),iconSize,iconSize)
+                playerRect = Rect(self.player.xpos*iconSize,self.player.ypos*iconSize,iconSize,iconSize)
+                if flowerRect.colliderect(playerRect):
+                    f.giveBonus(self.player)
+                    self.fallingFlowers.remove(f)
+                
 
     def displayScore(self):
         #print score etc at top of screen
@@ -298,7 +357,7 @@ class Game():
         windowSurfaceObj.fill(pygame.Color(20,20,240),Rect(waterBarx,waterBary, waterBarLength, charSize))
         
         #draw pellets
-        pelletsPosx = 0
+        pelletsPosx = (screenSize*iconSize-6*charSize)/2
         pelletsPosy = charSize * 3
         windowSurfaceObj.blit(pelletSurfaceObj,(pelletsPosx,pelletsPosy-charSize))
         myRender(windowSurfaceObj,(pelletsPosx+iconSize,pelletsPosy),"="+str(self.player.pellets))
@@ -333,6 +392,8 @@ class Game():
             self.player.water = min(self.player.water+50,self.player.maxWater)
 
         
+        hiscore = max(hiscore, self.player.score)
+
         self.displayScore()
 
         # take care of events
@@ -356,6 +417,14 @@ class Game():
                             if self.player.water>0:
                                 self.player.watering=True
                                 soundRefillWater.play(loops=-1)
+                if event.key==K_RETURN:
+                    if (not self.player.watering) and (not self.player.refilling) and (not self.player.isOutside):
+                        target = self.player.dir+self.player.xpos
+                        if (target in range(1,screenSize-2)) and (not target in [f.xpos for f in self.flowers]) and self.player.pellets>0:
+                            self.flowers.append(Flower(target))
+                            self.player.pellets-=1
+                            
+                            
             elif event.type==KEYUP:
                 if event.key==K_SPACE:
                     self.player.watering = False
